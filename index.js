@@ -1,42 +1,51 @@
-const { Telegraf } = require('telegraf');
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
-const express = require('express');
-const QRCode = require('qrcode');
-const pino = require('pino');
+import { Telegraf } from 'telegraf';
+import makeWASocket, { useMultiFileAuthState, DisconnectReason } from '@whiskeysockets/baileys';
+import express from 'express';
+import QRCode from 'qrcode';
+import pino from 'pino';
 
-// ⚠️ COLOQUE SEU TOKEN DO TELEGRAM AQUI
-const BOT_TOKEN = process.env.BOT_TOKEN || 'SEU_TOKEN_AQUI';
+// ⚠️ O TOKEN VEM DAS VARIÁVEIS DE AMBIENTE DO RENDER
+const BOT_TOKEN = process.env.BOT_TOKEN;
+if (!BOT_TOKEN) {
+    console.error("ERRO: Variável BOT_TOKEN não configurada no Render!");
+    process.exit(1);
+}
+
 const bot = new Telegraf(BOT_TOKEN);
-
 const app = express();
-let latestQR = null;
+let latestQR = null; // Guarda o QR Code atual na memória
 
+// Página inicial
 app.get('/', (req, res) => {
     res.send('<h1>Bot e WhatsApp rodando! Acesse /qr para conectar.</h1>');
 });
 
+// Página do QR Code (Pequeno e Fácil de Escanear)
 app.get('/qr', async (req, res) => {
     if (latestQR) {
-        const qrImage = await QRCode.toDataURL(latestQR);
-        res.send(`
-            <html>
-            <head>
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <!-- O SEGREDO ESTÁ AQUI: Atualiza a página a cada 15 segundos -->
-                <meta http-equiv="refresh" content="15">
-            </head>
-            <body style="background-color: #0d1117; color: #fff; font-family: sans-serif; text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; margin: 0;">
-                <h2 style="margin-bottom: 10px;">Conecte seu WhatsApp</h2>
-                <p style="color: #f39c12; font-size: 14px; margin-bottom: 20px; font-weight: bold;">⚠️ O código expira em 20 segundos. Escaneie rápido!</p>
-                <div style="background: white; padding: 15px; border-radius: 10px;">
-                    <img src="${qrImage}" style="width: 250px; height: 250px; display: block;" />
-                </div>
-                <p style="margin-top: 20px; color: #8b949e;">A página atualiza sozinha a cada 15s.</p>
-            </body>
-            </html>
-        `);
+        try {
+            const qrImage = await QRCode.toDataURL(latestQR);
+            res.send(`
+                <html>
+                <head>
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                    <!-- ATUALIZA A PÁGINA SOZINHA A CADA 15 SEGUNDOS -->
+                    <meta http-equiv="refresh" content="15">
+                </head>
+                <body style="background-color: #0d1117; color: #fff; font-family: sans-serif; text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; margin: 0;">
+                    <h2 style="margin-bottom: 10px;">Conecte seu WhatsApp</h2>
+                    <p style="color: #f39c12; font-size: 14px; margin-bottom: 20px; font-weight: bold;">⚠️ O código expira rápido. Escaneie agora!</p>
+                    <div style="background: white; padding: 15px; border-radius: 10px;">
+                        <img src="${qrImage}" style="width: 250px; height: 250px; display: block;" />
+                    </div>
+                    <p style="margin-top: 20px; color: #8b949e;">A página atualiza sozinha se o código expirar.</p>
+                </body>
+                </html>
+            `);
+        } catch (err) {
+            res.send('Erro ao gerar imagem do QR Code.');
+        }
     } else {
-        // Se o QR for nulo, pode ser que já conectou ou está gerando
         res.send(`
             <html>
             <head>
@@ -53,8 +62,9 @@ app.get('/qr', async (req, res) => {
     }
 });
 
+// Inicia o servidor Web para o Render não derrubar o bot
 app.listen(process.env.PORT || 3000, () => {
-    console.log('Servidor Web rodando...');
+    console.log('Servidor Web rodando na porta ' + (process.env.PORT || 3000));
 });
 
 let sock;
@@ -72,7 +82,7 @@ async function connectToWhatsApp() {
         const { connection, lastDisconnect, qr } = update;
 
         if (qr) {
-            latestQR = qr;
+            latestQR = qr; // Salva o QR para a página web
             console.log('Novo QR Code gerado. Acesse /qr no navegador.');
         }
 
@@ -93,24 +103,34 @@ async function connectToWhatsApp() {
 
 connectToWhatsApp();
 
+// ==========================================
+// COMANDOS DO TELEGRAM
+// ==========================================
 bot.start((ctx) => {
-    ctx.reply('Bem-vindo!\nUse: /enviar 5511999999999 Sua mensagem');
+    ctx.reply('Bem-vindo ao Painel!\n\nPara enviar mensagens use:\n/enviar 5511999999999 Sua mensagem aqui');
 });
 
 bot.command('enviar', async (ctx) => {
     const args = ctx.message.text.split(' ').slice(1);
-    if (args.length < 2) return ctx.reply('Uso correto: /enviar 5511999999999 Sua mensagem');
-    const number = args[0].replace(/\D/g, '');
+    if (args.length < 2) return ctx.reply('Uso correto: /enviar 5511999999999 Sua mensagem aqui');
+
+    const number = args[0].replace(/\D/g, ''); // Remove tudo que não é número
     const message = args.slice(1).join(' ');
 
-    if (!sock) return ctx.reply('❌ WhatsApp não conectado. Acesse /qr');
+    if (!sock) return ctx.reply('❌ WhatsApp ainda não está conectado. Acesse a página /qr no seu navegador.');
 
     try {
         await sock.sendMessage(`${number}@s.whatsapp.net`, { text: message });
-        ctx.reply(`✅ Enviado para ${number}!`);
+        ctx.reply(`✅ Mensagem enviada para ${number} com sucesso!`);
     } catch (error) {
-        ctx.reply('❌ Erro ao enviar. Verifique o número.');
+        console.error(error);
+        ctx.reply('❌ Erro ao enviar mensagem. Verifique se o número tem WhatsApp.');
     }
 });
 
-bot.launch().then(() => console.log('🤖 Bot do Telegram iniciado!'));
+// Inicia o bot do Telegram
+bot.launch().then(() => console.log('🤖 Bot do Telegram iniciado!'))
+    .catch((err) => console.error('Erro ao iniciar o bot:', err));
+
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
