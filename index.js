@@ -1,5 +1,6 @@
 import { Telegraf } from 'telegraf';
-import makeWASocket, { useMultiFileAuthState, DisconnectReason } from '@whiskeysockets/baileys';
+import pkg from '@whiskeysockets/baileys';
+const { makeWASocket, useMultiFileAuthState, DisconnectReason } = pkg;
 import express from 'express';
 import QRCode from 'qrcode';
 import pino from 'pino';
@@ -13,14 +14,12 @@ if (!BOT_TOKEN) {
 
 const bot = new Telegraf(BOT_TOKEN);
 const app = express();
-let latestQR = null; // Guarda o QR Code atual na memória
+let latestQR = null; 
 
-// Página inicial
 app.get('/', (req, res) => {
     res.send('<h1>Bot e WhatsApp rodando! Acesse /qr para conectar.</h1>');
 });
 
-// Página do QR Code (Pequeno e Fácil de Escanear)
 app.get('/qr', async (req, res) => {
     if (latestQR) {
         try {
@@ -29,7 +28,6 @@ app.get('/qr', async (req, res) => {
                 <html>
                 <head>
                     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                    <!-- ATUALIZA A PÁGINA SOZINHA A CADA 15 SEGUNDOS -->
                     <meta http-equiv="refresh" content="15">
                 </head>
                 <body style="background-color: #0d1117; color: #fff; font-family: sans-serif; text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; margin: 0;">
@@ -62,7 +60,6 @@ app.get('/qr', async (req, res) => {
     }
 });
 
-// Inicia o servidor Web para o Render não derrubar o bot
 app.listen(process.env.PORT || 3000, () => {
     console.log('Servidor Web rodando na porta ' + (process.env.PORT || 3000));
 });
@@ -82,7 +79,7 @@ async function connectToWhatsApp() {
         const { connection, lastDisconnect, qr } = update;
 
         if (qr) {
-            latestQR = qr; // Salva o QR para a página web
+            latestQR = qr; 
             console.log('Novo QR Code gerado. Acesse /qr no navegador.');
         }
 
@@ -94,7 +91,7 @@ async function connectToWhatsApp() {
             }
         } else if (connection === 'open') {
             console.log('✅ WhatsApp Conectado com sucesso!');
-            latestQR = null; // Limpa o QR pois já conectou
+            latestQR = null; 
         }
     });
 
@@ -103,9 +100,6 @@ async function connectToWhatsApp() {
 
 connectToWhatsApp();
 
-// ==========================================
-// COMANDOS DO TELEGRAM
-// ==========================================
 bot.start((ctx) => {
     ctx.reply('Bem-vindo ao Painel!\n\nPara enviar mensagens use:\n/enviar 5511999999999 Sua mensagem aqui');
 });
@@ -114,7 +108,7 @@ bot.command('enviar', async (ctx) => {
     const args = ctx.message.text.split(' ').slice(1);
     if (args.length < 2) return ctx.reply('Uso correto: /enviar 5511999999999 Sua mensagem aqui');
 
-    const number = args[0].replace(/\D/g, ''); // Remove tudo que não é número
+    const number = args[0].replace(/\D/g, ''); 
     const message = args.slice(1).join(' ');
 
     if (!sock) return ctx.reply('❌ WhatsApp ainda não está conectado. Acesse a página /qr no seu navegador.');
@@ -128,7 +122,6 @@ bot.command('enviar', async (ctx) => {
     }
 });
 
-// Inicia o bot do Telegram
 bot.launch().then(() => console.log('🤖 Bot do Telegram iniciado!'))
     .catch((err) => console.error('Erro ao iniciar o bot:', err));
 
