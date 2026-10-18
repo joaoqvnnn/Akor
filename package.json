@@ -10,7 +10,7 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^7.0.0",
+    "@whiskeysockets/baileys": "^6.17.16",
     "telegraf": "^4.16.3",
     "express": "^4.19.2",
     "qrcode": "^1.5.3",
