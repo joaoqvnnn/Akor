@@ -1,11 +1,12 @@
 import { Telegraf } from 'telegraf';
 import pkg from '@whiskeysockets/baileys';
-const { makeWASocket, useMultiFileAuthState, DisconnectReason } = pkg;
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = pkg;
 import express from 'express';
 import QRCode from 'qrcode';
 import pino from 'pino';
+import fs from 'fs';
 
-// ⚠️ O TOKEN VEM DAS VARIÁVEIS DE AMBIENTE DO RENDER
+// Pega o token do Telegram
 const BOT_TOKEN = process.env.BOT_TOKEN;
 if (!BOT_TOKEN) {
     console.error("ERRO: Variável BOT_TOKEN não configurada no Render!");
@@ -17,7 +18,7 @@ const app = express();
 let latestQR = null; 
 
 app.get('/', (req, res) => {
-    res.send('<h1>Bot e WhatsApp rodando! Acesse /qr para conectar.</h1>');
+    res.send('<h1>Bot rodando! Acesse /qr para conectar.</h1>');
 });
 
 app.get('/qr', async (req, res) => {
@@ -48,12 +49,12 @@ app.get('/qr', async (req, res) => {
             <html>
             <head>
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <meta http-equiv="refresh" content="5">
+                <meta http-equiv="refresh" content="3">
             </head>
             <body style="background-color: #0d1117; color: #fff; font-family: sans-serif; text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; margin: 0;">
-                <h2 style="color: #238636;">✅ WhatsApp Conectado ou Gerando Código!</h2>
-                <p style="color: #8b949e;">Se você já escaneou, está tudo certo. Pode fechar esta página.</p>
-                <p style="color: #8b949e;">Se ainda não escaneou, aguarde 5 segundos (a página vai atualizar).</p>
+                <h2 style="color: #f39c12;">⏳ Aguardando conexão com WhatsApp...</h2>
+                <p style="color: #8b949e;">O bot está tentando gerar o código. A página atualiza a cada 3s.</p>
+                <p style="color: #8b949e; font-size: 12px;">(Se demorar muito, veja os Logs no Render)</p>
             </body>
             </html>
         `);
@@ -67,9 +68,20 @@ app.listen(process.env.PORT || 3000, () => {
 let sock;
 
 async function connectToWhatsApp() {
+    // Limpa a pasta de autenticação toda vez que inicia para garantir um QR Code novo e evitar loop
+    if (fs.existsSync('auth_info_baileys')) {
+        console.log('Limpando sessão antiga para gerar novo QR Code...');
+        fs.rmSync('auth_info_baileys', { recursive: true, force: true });
+    }
+
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
+    
+    // Busca a versão mais atual do WhatsApp Web para evitar bloqueios
+    const { version, isLatest } = await fetchLatestBaileysVersion();
+    console.log(`Usando WhatsApp Web v${version.join('.')}, isLatest: ${isLatest}`);
 
     sock = makeWASocket({
+        version,
         auth: state,
         printQRInTerminal: false, 
         logger: pino({ level: 'silent' })
@@ -80,12 +92,17 @@ async function connectToWhatsApp() {
 
         if (qr) {
             latestQR = qr; 
-            console.log('Novo QR Code gerado. Acesse /qr no navegador.');
+            console.log('✅ QR Code gerado! Acesse /qr no navegador.');
         }
 
         if (connection === 'close') {
-            const shouldReconnect = (lastDisconnect.error)?.output?.statusCode !== DisconnectReason.loggedOut;
-            console.log('Conexão fechada. Reconectando:', shouldReconnect);
+            const statusCode = (lastDisconnect.error)?.output?.statusCode;
+            console.log('Conexão fechada. Motivo/Erro:', lastDisconnect.error);
+            
+            // Se for loggedOut (deslogado), não reconecta, senão entra em loop
+            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+            console.log('Tentando reconectar:', shouldReconnect);
+            
             if (shouldReconnect) {
                 connectToWhatsApp();
             }
@@ -100,30 +117,26 @@ async function connectToWhatsApp() {
 
 connectToWhatsApp();
 
+// Comandos do Telegram
 bot.start((ctx) => {
-    ctx.reply('Bem-vindo ao Painel!\n\nPara enviar mensagens use:\n/enviar 5511999999999 Sua mensagem aqui');
+    ctx.reply('Bem-vindo!\nUse: /enviar 5511999999999 Sua mensagem');
 });
 
 bot.command('enviar', async (ctx) => {
     const args = ctx.message.text.split(' ').slice(1);
-    if (args.length < 2) return ctx.reply('Uso correto: /enviar 5511999999999 Sua mensagem aqui');
-
-    const number = args[0].replace(/\D/g, ''); 
+    if (args.length < 2) return ctx.reply('Uso: /enviar 5511999999999 Sua mensagem');
+    const number = args[0].replace(/\D/g, '');
     const message = args.slice(1).join(' ');
 
-    if (!sock) return ctx.reply('❌ WhatsApp ainda não está conectado. Acesse a página /qr no seu navegador.');
+    if (!sock) return ctx.reply('❌ WhatsApp não conectado. Acesse /qr');
 
     try {
         await sock.sendMessage(`${number}@s.whatsapp.net`, { text: message });
-        ctx.reply(`✅ Mensagem enviada para ${number} com sucesso!`);
+        ctx.reply(`✅ Enviado para ${number}!`);
     } catch (error) {
-        console.error(error);
-        ctx.reply('❌ Erro ao enviar mensagem. Verifique se o número tem WhatsApp.');
+        ctx.reply('❌ Erro ao enviar.');
     }
 });
 
 bot.launch().then(() => console.log('🤖 Bot do Telegram iniciado!'))
-    .catch((err) => console.error('Erro ao iniciar o bot:', err));
-
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+    .catch((err) => console.error('Erro no Telegram:', err));
