@@ -1,7 +1,6 @@
 import { Telegraf } from 'telegraf';
-// Importa fetchLatestWaWebVersion em vez de fetchLatestBaileysVersion
 import pkg from '@whiskeysockets/baileys';
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestWaWebVersion } = pkg;
+const { default: makeWASocket, useMultiFileAuthState, fetchLatestWaWebVersion, Browsers } = pkg;
 import express from 'express';
 import pino from 'pino';
 import fs from 'fs';
@@ -16,12 +15,8 @@ const bot = new Telegraf(BOT_TOKEN);
 const app = express();
 let sock = null;
 
-app.get('/', (req, res) => {
-    res.send('<h1>Bot rodando! Use /parear no Telegram.</h1>');
-});
-app.listen(process.env.PORT || 3000, () => {
-    console.log('Servidor Web rodando...');
-});
+app.get('/', (req, res) => res.send('<h1>Bot rodando! Use /parear no Telegram.</h1>'));
+app.listen(process.env.PORT || 3000, () => console.log('Servidor Web rodando...'));
 
 async function connectWithPairingCode(phoneNumber, ctx) {
     try {
@@ -30,7 +25,6 @@ async function connectWithPairingCode(phoneNumber, ctx) {
         }
 
         const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
-        // 🔥 USA A FUNÇÃO CORRETA PARA OBTER A VERSÃO ATUAL DO WHATSAPP WEB
         const { version } = await fetchLatestWaWebVersion();
         console.log(`Usando WhatsApp Web v${version.join('.')}`);
 
@@ -38,15 +32,18 @@ async function connectWithPairingCode(phoneNumber, ctx) {
             version,
             auth: state,
             printQRInTerminal: false,
+            // 🔥 FORÇA A IDENTIFICAÇÃO COMO CHROME NO UBUNTU
+            browser: Browsers.ubuntu('Chrome'), 
             logger: pino({ level: 'silent' })
         });
 
-        if (!sock.authState.creds.registered) {
-            // Aguarda um pequeno delay para o socket estar pronto
-            setTimeout(async () => {
+        // 🔥 ESCUTA O EVENTO PARA GERAR O CÓDIGO NO MOMENTO CERTO
+        sock.ev.on('connection.update', async (update) => {
+            const { connection, lastDisconnect } = update;
+
+            if (connection === 'connecting' && !sock.authState.creds.registered) {
                 try {
-                    // 🔥 GARANTE QUE APENAS NÚMEROS SEJAM ENVIADOS
-                    const cleanNumber = phoneNumber.replace(/\D/g, ''); 
+                    const cleanNumber = phoneNumber.replace(/\D/g, '');
                     const code = await sock.requestPairingCode(cleanNumber);
                     const formattedCode = code?.match(/.{1,4}/g)?.join('-') || code;
                     
@@ -54,20 +51,18 @@ async function connectWithPairingCode(phoneNumber, ctx) {
                     console.log(`Código gerado para ${cleanNumber}: ${code}`);
                 } catch (err) {
                     console.error("Erro ao gerar código:", err);
-                    ctx.reply("❌ Erro ao gerar o código.");
+                    ctx.reply("❌ Erro ao gerar o código. Tente novamente.");
                 }
-            }, 3000);
-        }
+            }
 
-        sock.ev.on('connection.update', (update) => {
-            const { connection, lastDisconnect } = update;
             if (connection === 'close') {
-                console.log('Conexão fechada.');
+                console.log('Conexão fechada:', lastDisconnect.error?.output?.statusCode);
             } else if (connection === 'open') {
                 console.log('✅ WhatsApp Conectado!');
                 ctx.reply('✅ *WhatsApp conectado com sucesso!* Use /enviar.', { parse_mode: 'Markdown' });
             }
         });
+
         sock.ev.on('creds.update', saveCreds);
 
     } catch (error) {
@@ -76,14 +71,12 @@ async function connectWithPairingCode(phoneNumber, ctx) {
     }
 }
 
-bot.start((ctx) => {
-    ctx.reply('Bem-vindo!\nEnvie: /parear 573166086923 (DDI + DDD + Número)');
-});
+bot.start((ctx) => ctx.reply('Bem-vindo!\nEnvie: /parear 573166086923 (DDI + DDD + Número)'));
 
 bot.command('parear', async (ctx) => {
     const args = ctx.message.text.split(' ').slice(1);
     if (args.length === 0) return ctx.reply('Uso: /parear 573166086923');
-    const phoneNumber = args[0].replace(/\D/g, ''); // Limpa o número aqui também
+    const phoneNumber = args[0].replace(/\D/g, '');
     if (phoneNumber.length < 10) return ctx.reply('Número inválido.');
     
     ctx.reply(`⏳ Gerando código para ${phoneNumber}...`);
